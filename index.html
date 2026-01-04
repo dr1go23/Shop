@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Магазин</title>
+<style>
+body { font-family: Arial; background:#f0f4f8; padding:20px; }
+.box { background:white; padding:20px; border-radius:12px; max-width:420px; margin:auto; box-shadow:0 4px 10px rgba(0,0,0,0.1);}
+h3 { text-align:center; margin-bottom:10px; }
+input, button, textarea { width:100%; padding:12px; margin-top:8px; font-size:16px; border-radius:8px; border:1px solid #ccc; }
+button { background:#4CAF50; color:white; border:none; cursor:pointer; transition:0.2s; }
+button:hover { background:#45a049; }
+.result { font-weight:bold; margin-top:10px; text-align:center; }
+hr { margin:15px 0; }
+</style>
+</head>
+<body>
+
+<div class="box">
+
+<!-- Вход/Регистрация -->
+<div id="authBox">
+<h3>🔐 Вход / Регистрация</h3>
+<input id="user" placeholder="Логин">
+<input id="pass" type="password" placeholder="Пароль">
+<button onclick="login()">Войти</button>
+<button onclick="register()">Зарегистрироваться</button>
+<div class="result" id="result"></div>
+</div>
+
+<!-- Покупатель -->
+<div id="customerBox" style="display:none">
+<h3>👤 Панель покупателя</h3>
+<p>💰 Ваш баланс: <b id="customerBalance">0</b> ₸</p>
+
+<hr>
+<h4>Использовать сертификат:</h4>
+<input id="code" placeholder="Код сертификата">
+<input id="sum" type="number" placeholder="Сумма">
+<button onclick="useCertCustomer()">💸 Потратить сертификат</button>
+
+<hr>
+<h4>Если что-то не так, напишите репорт:</h4>
+<textarea id="reportText" placeholder="Опишите проблему..." style="height:80px;"></textarea>
+<button onclick="sendReport()">📩 Отправить репорт</button>
+
+<hr>
+<button onclick="logout()">Выйти</button>
+</div>
+
+<!-- Панель админа -->
+<div id="adminBox" style="display:none">
+<h3>👑 Панель Админа</h3>
+<p>💰 Баланс магазина: <b id="balance">0</b> ₸</p>
+
+<hr>
+<h4>🎁 Создать сертификат</h4>
+<input id="newCode" placeholder="Код сертификата">
+<input id="newSum" type="number" placeholder="Сумма">
+<button onclick="createCert()">Создать</button>
+
+<hr>
+<h4>💳 Списать сертификат</h4>
+<input id="codeAdmin" placeholder="Код сертификата">
+<input id="sumAdmin" type="number" placeholder="Сумма покупки">
+<button onclick="useCertAdmin()">Списать</button>
+
+<hr>
+<h4>➖ Списать деньги у покупателя</h4>
+<input id="targetUser" placeholder="Логин покупателя">
+<input id="minusSum" type="number" placeholder="Сумма">
+<button onclick="adminTakeMoney()">Списать деньги</button>
+
+<hr>
+<h4>👀 Локальные данные (localStorage)</h4>
+<textarea id="data" style="height:150px;"></textarea>
+<button onclick="saveData()">Сохранить данные</button>
+
+<hr>
+<h4>📋 Репорты покупателей</h4>
+<button onclick="showReports()">Показать все репорты</button>
+
+<button style="margin-top:15px;" onclick="logout()">Выйти</button>
+</div>
+
+</div>
+
+<script>
+// ===== ДАННЫЕ =====
+const admins = { "admin1":"1234", "admin2":"5678" };
+let users = JSON.parse(localStorage.getItem("users")) || {}; // {login:{password, balance}}
+let certs = JSON.parse(localStorage.getItem("certs")) || {};
+let reports = JSON.parse(localStorage.getItem("reports")) || [];
+let shopBalance = Number(localStorage.getItem("shopBalance")) || 0;
+
+let currentUser = "";
+let currentRole = "";
+
+// ===== СОХРАНЕНИЕ =====
+function save() {
+  localStorage.setItem("users", JSON.stringify(users));
+  localStorage.setItem("certs", JSON.stringify(certs));
+  localStorage.setItem("reports", JSON.stringify(reports));
+  localStorage.setItem("shopBalance", shopBalance);
+}
+
+// ===== РЕГИСТРАЦИЯ =====
+function register() {
+  const u = user.value.trim();
+  const p = pass.value.trim();
+  if(!u || !p){ alert("Введите логин и пароль"); return; }
+  if(users[u] || admins[u]){ alert("Такой логин уже занят"); return; }
+  users[u] = { password:p, balance:0 };
+  save();
+  alert("✅ Покупатель зарегистрирован");
+}
+
+// ===== ВХОД =====
+function login() {
+  const u = user.value.trim();
+  const p = pass.value.trim();
+  // Админ
+  if(admins[u] && admins[u]===p){
+    currentRole="admin";
+    currentUser=u;
+    authBox.style.display="none";
+    adminBox.style.display="block";
+    balance.innerText=shopBalance;
+    showData();
+    return;
+  }
+  // Покупатель
+  if(users[u] && users[u].password===p){
+    currentRole="customer";
+    currentUser=u;
+    authBox.style.display="none";
+    customerBox.style.display="block";
+    updateCustomerBalance();
+    return;
+  }
+  alert("❌ Неверный логин или пароль");
+}
+
+// ===== ВЫЙТИ =====
+function logout() {
+  currentUser=""; currentRole="";
+  authBox.style.display="block";
+  adminBox.style.display="none";
+  customerBox.style.display="none";
+  user.value=""; pass.value=""; result.innerText="";
+}
+
+// ===== БАЛАНС ПОКУПАТЕЛЯ =====
+function updateCustomerBalance() {
+  customerBalance.innerText = users[currentUser].balance;
+}
+
+// ===== СЕРТИФИКАТЫ =====
+function createCert() {
+  if(currentRole!=="admin"){ alert("❌ Только админ может создавать сертификаты"); return; }
+  let c = newCode.value.trim();
+  let s = Number(newSum.value);
+  if(!c || !s){ alert("Введите код и сумму"); return; }
+  if(certs[c]){ alert("Такой код уже есть"); return; }
+  certs[c]=s;
+  save();
+  alert("✅ Сертификат создан");
+  newCode.value=""; newSum.value="";
+}
+
+function useCertAdmin() {
+  if(currentRole!=="admin"){ alert("❌ Только админ может списывать сертификаты"); return; }
+  let c = codeAdmin.value.trim();
+  let s = Number(sumAdmin.value);
+  if(!certs[c]){ alert("Нет такого сертификата"); return; }
+  if(s>certs[c]){ alert("Недостаточно средств"); return; }
+  certs[c]-=s;
+  shopBalance+=s;
+  balance.innerText=shopBalance;
+  save();
+  alert("✅ Сертификат списан");
+  codeAdmin.value=""; sumAdmin.value="";
+}
+
+// ===== ПОТРАТЬ СЕРТИФИКАТ ПОКУПАТЕЛЕМ =====
+function useCertCustomer() {
+  if(currentRole!=="customer"){ alert("❌ Только покупатель может использовать сертификат"); return; }
+  let c = code.value.trim();
+  let s = Number(sum.value);
+  if(!certs[c]){ alert("❌ Нет такого сертификата"); return; }
+  if(s>certs[c]){ alert("❌ Недостаточно средств"); return; }
+  certs[c]-=s;
+  users[currentUser].balance+=s;
+  save();
+  updateCustomerBalance();
+  alert("✅ Сертификат потрачен, баланс обновлен");
+  code.value=""; sum.value="";
+}
+
+// ===== СПИСАТЬ ДЕНЬГИ У ПОКУПАТЕЛЯ (АДМИН) =====
+function adminTakeMoney() {
+  if(currentRole!=="admin"){ alert("❌ Только админ может списывать деньги"); return; }
+  let u = targetUser.value.trim();
+  let s = Number(minusSum.value);
+  if(!users[u]){ alert("❌ Нет такого покупателя"); return; }
+  if(s<=0){ alert("❌ Неверная сумма"); return; }
+  if(users[u].balance<s){ alert("❌ У покупателя недостаточно средств"); return; }
+  users[u].balance-=s;
+  shopBalance+=s;
+  balance.innerText=shopBalance;
+  save();
+  alert(`✅ Списано ${s} ₸ у ${u}`);
+  targetUser.value=""; minusSum.value="";
+}
+
+// ===== РЕПОРТЫ =====
+function sendReport() {
+  if(currentRole!=="customer"){ alert("❌ Только покупатель может писать репорт"); return; }
+  const text = document.getElementById("reportText").value.trim();
+  if(!text){ alert("Введите текст"); return; }
+  reports.push({user:currentUser, text:text, date:new Date().toLocaleString()});
+  save();
+  alert("✅ Репорт отправлен");
+  document.getElementById("reportText").value="";
+}
+
+function showReports() {
+  if(currentRole!=="admin"){ alert("❌ Только админ может видеть репорты"); return; }
+  if(reports.length===0){ alert("Нет репортов"); return; }
+  let list="";
+  reports.forEach((r,i)=>{ list+=`${i+1}. ${r.date} (${r.user}): ${r.text}\n`; });
+  alert(list);
+}
+
+// ===== Локал только для админа =====
+function showData() {
+  if(currentRole!=="admin") return;
+  data.value = JSON.stringify({users, certs, shopBalance, reports}, null, 2);
+}
+
+function saveData() {
+  if(currentRole!=="admin") return;
+  try{
+    let d = JSON.parse(data.value);
+    users = d.users || {};
+    certs = d.certs || {};
+    shopBalance = d.shopBalance || 0;
+    reports = d.reports || [];
+    save();
+    balance.innerText=shopBalance;
+    alert("Данные сохранены");
+  }catch(e){ alert("Ошибка JSON"); }
+}
+</script>
+
+</body>
+  </html>
