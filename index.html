@@ -42,7 +42,7 @@ hr { margin:15px 0; }
 
 <hr>
 <h4>Если что-то не так, напишите репорт:</h4>
-<textarea id="reportText" placeholder="Опишите проблему..." style="height:80px;"></textarea>
+<textarea id="reportText" placeholder="Опишите проблему..." style="height:80px"></textarea>
 <button onclick="sendReport()">📩 Отправить репорт</button>
 
 <hr>
@@ -73,69 +73,64 @@ hr { margin:15px 0; }
 <button onclick="adminTakeMoney()">Списать деньги</button>
 
 <hr>
-<h4>👀 Локальные данные (localStorage)</h4>
-<textarea id="data" style="height:150px;"></textarea>
-<button onclick="saveData()">Сохранить данные</button>
-
-<hr>
 <h4>📋 Репорты покупателей</h4>
 <button onclick="showReports()">Показать все репорты</button>
 
+<hr>
 <button style="margin-top:15px;" onclick="logout()">Выйти</button>
 </div>
 
 </div>
 
 <script>
+// ===== Ссылка на Web App =====
+const CERTS_API = "https://script.google.com/macros/s/AKfycbwxLRY97QuIdFI__mf1BiE1eDkqu1xqNsdhdSnJYTjdgUIVGBgLknoEEOKp1mMKDMJcxw/exec";
+
 // ===== ДАННЫЕ =====
 const admins = { "admin1":"1234", "admin2":"5678" };
-let users = JSON.parse(localStorage.getItem("users")) || {}; // {login:{password, balance}}
-let certs = JSON.parse(localStorage.getItem("certs")) || {};
-let reports = JSON.parse(localStorage.getItem("reports")) || [];
-let shopBalance = Number(localStorage.getItem("shopBalance")) || 0;
-
+let users = {}; // {login:{password, balance}}
+let certs = {}; // {code:balance}
 let currentUser = "";
 let currentRole = "";
 
-// ===== СОХРАНЕНИЕ =====
-function save() {
-  localStorage.setItem("users", JSON.stringify(users));
-  localStorage.setItem("certs", JSON.stringify(certs));
-  localStorage.setItem("reports", JSON.stringify(reports));
-  localStorage.setItem("shopBalance", shopBalance);
+// ===== ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ POST =====
+async function postData(action, code="", amount=0, comment=""){
+  if(!currentUser) return;
+  const payload = {action, code, amount, user:currentUser, role:currentRole, comment};
+  try{
+    await fetch(CERTS_API, {
+      method:"POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    });
+  }catch(e){
+    console.error("Ошибка отправки на Web App:", e);
+  }
 }
 
 // ===== РЕГИСТРАЦИЯ =====
-function register() {
+function register(){
   const u = user.value.trim();
   const p = pass.value.trim();
-  if(!u || !p){ alert("Введите логин и пароль"); return; }
-  if(users[u] || admins[u]){ alert("Такой логин уже занят"); return; }
-  users[u] = { password:p, balance:0 };
-  save();
+  if(!u||!p){ alert("Введите логин и пароль"); return; }
+  if(users[u]||admins[u]){ alert("Такой логин уже занят"); return; }
+  users[u]={password:p,balance:0};
   alert("✅ Покупатель зарегистрирован");
 }
 
 // ===== ВХОД =====
-function login() {
+function login(){
   const u = user.value.trim();
   const p = pass.value.trim();
-  // Админ
-  if(admins[u] && admins[u]===p){
-    currentRole="admin";
-    currentUser=u;
-    authBox.style.display="none";
-    adminBox.style.display="block";
-    balance.innerText=shopBalance;
-    showData();
+  if(admins[u]&&admins[u]===p){
+    currentRole="admin"; currentUser=u;
+    authBox.style.display="none"; adminBox.style.display="block";
+    balance.innerText=0;
     return;
   }
-  // Покупатель
-  if(users[u] && users[u].password===p){
-    currentRole="customer";
-    currentUser=u;
-    authBox.style.display="none";
-    customerBox.style.display="block";
+  if(users[u]&&users[u].password===p){
+    currentRole="customer"; currentUser=u;
+    authBox.style.display="none"; customerBox.style.display="block";
     updateCustomerBalance();
     return;
   }
@@ -143,7 +138,7 @@ function login() {
 }
 
 // ===== ВЫЙТИ =====
-function logout() {
+function logout(){
   currentUser=""; currentRole="";
   authBox.style.display="block";
   adminBox.style.display="none";
@@ -151,108 +146,66 @@ function logout() {
   user.value=""; pass.value=""; result.innerText="";
 }
 
-// ===== БАЛАНС ПОКУПАТЕЛЯ =====
-function updateCustomerBalance() {
-  customerBalance.innerText = users[currentUser].balance;
+// ===== ОБНОВЛЕНИЕ БАЛАНСА =====
+function updateCustomerBalance(){ customerBalance.innerText = users[currentUser]?.balance||0; }
+
+// ===== СЕРТИФИКАТЫ ПОКУПАТЕЛЕМ =====
+async function useCertCustomer(){
+  let c=code.value.trim();
+  let s=Number(sum.value);
+  if(!c||!s){ alert("Введите код и сумму"); return; }
+  certs[c]=(certs[c]||0);
+  if(s>certs[c]){ alert("❌ Недостаточно средств"); return; }
+  certs[c]-=s;
+  users[currentUser].balance=(users[currentUser].balance||0)+s;
+  updateCustomerBalance();
+  await postData("USE_CUSTOMER",c,s,"Использован сертификат");
+  alert("✅ Сертификат потрачен");
+  code.value=""; sum.value="";
 }
 
-// ===== СЕРТИФИКАТЫ =====
-function createCert() {
-  if(currentRole!=="admin"){ alert("❌ Только админ может создавать сертификаты"); return; }
-  let c = newCode.value.trim();
-  let s = Number(newSum.value);
-  if(!c || !s){ alert("Введите код и сумму"); return; }
-  if(certs[c]){ alert("Такой код уже есть"); return; }
-  certs[c]=s;
-  save();
+// ===== СЕРТИФИКАТЫ АДМИНОМ =====
+async function createCert(){
+  let c=newCode.value.trim();
+  let s=Number(newSum.value);
+  if(!c||!s){ alert("Введите код и сумму"); return; }
+  certs[c]=(certs[c]||0)+s;
+  await postData("CREATE",c,s,"Создан сертификат");
   alert("✅ Сертификат создан");
   newCode.value=""; newSum.value="";
 }
 
-function useCertAdmin() {
-  if(currentRole!=="admin"){ alert("❌ Только админ может списывать сертификаты"); return; }
-  let c = codeAdmin.value.trim();
-  let s = Number(sumAdmin.value);
+async function useCertAdmin(){
+  let c=codeAdmin.value.trim();
+  let s=Number(sumAdmin.value);
   if(!certs[c]){ alert("Нет такого сертификата"); return; }
   if(s>certs[c]){ alert("Недостаточно средств"); return; }
   certs[c]-=s;
-  shopBalance+=s;
-  balance.innerText=shopBalance;
-  save();
+  await postData("USE_ADMIN",c,s,"Списан сертификат админом");
   alert("✅ Сертификат списан");
   codeAdmin.value=""; sumAdmin.value="";
 }
 
-// ===== ПОТРАТЬ СЕРТИФИКАТ ПОКУПАТЕЛЕМ =====
-function useCertCustomer() {
-  if(currentRole!=="customer"){ alert("❌ Только покупатель может использовать сертификат"); return; }
-  let c = code.value.trim();
-  let s = Number(sum.value);
-  if(!certs[c]){ alert("❌ Нет такого сертификата"); return; }
-  if(s>certs[c]){ alert("❌ Недостаточно средств"); return; }
-  certs[c]-=s;
-  users[currentUser].balance+=s;
-  save();
-  updateCustomerBalance();
-  alert("✅ Сертификат потрачен, баланс обновлен");
-  code.value=""; sum.value="";
-}
-
-// ===== СПИСАТЬ ДЕНЬГИ У ПОКУПАТЕЛЯ (АДМИН) =====
-function adminTakeMoney() {
-  if(currentRole!=="admin"){ alert("❌ Только админ может списывать деньги"); return; }
-  let u = targetUser.value.trim();
-  let s = Number(minusSum.value);
-  if(!users[u]){ alert("❌ Нет такого покупателя"); return; }
-  if(s<=0){ alert("❌ Неверная сумма"); return; }
-  if(users[u].balance<s){ alert("❌ У покупателя недостаточно средств"); return; }
+async function adminTakeMoney(){
+  let u=targetUser.value.trim();
+  let s=Number(minusSum.value);
+  if(!users[u]){ alert("Нет такого пользователя"); return; }
+  if(s>users[u].balance){ alert("Недостаточно средств"); return; }
   users[u].balance-=s;
-  shopBalance+=s;
-  balance.innerText=shopBalance;
-  save();
+  await postData("ADMIN_TAKE","",s,"Списано у "+u);
   alert(`✅ Списано ${s} ₸ у ${u}`);
   targetUser.value=""; minusSum.value="";
 }
 
 // ===== РЕПОРТЫ =====
-function sendReport() {
-  if(currentRole!=="customer"){ alert("❌ Только покупатель может писать репорт"); return; }
-  const text = document.getElementById("reportText").value.trim();
+async function sendReport(){
+  const text=reportText.value.trim();
   if(!text){ alert("Введите текст"); return; }
-  reports.push({user:currentUser, text:text, date:new Date().toLocaleString()});
-  save();
+  await postData("REPORT","",0,text);
   alert("✅ Репорт отправлен");
-  document.getElementById("reportText").value="";
-}
-
-function showReports() {
-  if(currentRole!=="admin"){ alert("❌ Только админ может видеть репорты"); return; }
-  if(reports.length===0){ alert("Нет репортов"); return; }
-  let list="";
-  reports.forEach((r,i)=>{ list+=`${i+1}. ${r.date} (${r.user}): ${r.text}\n`; });
-  alert(list);
-}
-
-// ===== Локал только для админа =====
-function showData() {
-  if(currentRole!=="admin") return;
-  data.value = JSON.stringify({users, certs, shopBalance, reports}, null, 2);
-}
-
-function saveData() {
-  if(currentRole!=="admin") return;
-  try{
-    let d = JSON.parse(data.value);
-    users = d.users || {};
-    certs = d.certs || {};
-    shopBalance = d.shopBalance || 0;
-    reports = d.reports || [];
-    save();
-    balance.innerText=shopBalance;
-    alert("Данные сохранены");
-  }catch(e){ alert("Ошибка JSON"); }
+  reportText.value="";
 }
 </script>
 
 </body>
-  </html>
+</html>
